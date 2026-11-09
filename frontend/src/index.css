@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* Design tokens from the Vigilance dashboard design spec (dark-first). */
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-bg: #0b1120;
+  --color-surface: #111827;
+  --color-elevated: #1e293b;
+  --color-hover: #263449;
+  --color-line: #293548;
+  --color-primary: #3b82f6;
+  --color-primary-soft: #1d4ed8;
+  --color-accent: #60a5fa;
+  --color-fg: #e5e7eb;
+  --color-muted: #9ca3af;
+  --color-subtle: #6b7280;
+  --color-info: #38bdf8;
+
+  /* Status (text on tinted background). */
+  --color-ok: #4ade80;
+  --color-ok-bg: #0f2e1c;
+  --color-warn: #fbbf24;
+  --color-warn-bg: #3b2a0b;
+  --color-fail: #fca5a5;
+  --color-fail-bg: #3f1515;
+  --color-info-bg: #0c2a3d;
+
+  /* Severity marks. Validated on #111827: high/medium re-stepped so the
+     adjacent pair stays distinguishable; always paired with a text label. */
+  --color-sev-critical: #dc2626;
+  --color-sev-high: #f97316;
+  --color-sev-medium: #eab308;
+  --color-sev-low: #3b82f6;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@keyframes shimmer {
+  0% { opacity: 0.45; }
+  50% { opacity: 0.8; }
+  100% { opacity: 0.45; }
+}
+
+.skeleton {
+  background: var(--color-elevated);
+  border-radius: 6px;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+  * { transition: none !important; }
+}

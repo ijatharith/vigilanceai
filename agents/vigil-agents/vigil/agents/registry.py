@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import os
+import ssl
+
+from vigil.core.database import VigilStore
+from vigil.core.models import AgentDependencies
+from vigil.core.runtime import AgentRuntime
+from vigil.core.settings import Settings, get_settings
+from vigil.core.validation import EvidenceValidator
+from vigil.integrations.mock.connector import MockTelemetryConnector
+from vigil.integrations.wazuh.connector import WazuhTelemetryConnector
+from vigil.integrations.wazuh.indexer import WazuhIndexerClient
+from vigil.integrations.wazuh.manager import WazuhManagerClient
+from vigil.llm.model_manager import ModelManager
+from vigil.integrations.threat_intel.connector import VirusTotalHashConnector
+from vigil.plugins.manager import PluginManager, build_plugin_manager
+
+
+class AgentRegistry:
+    def __init__(self, dependencies: AgentDependencies, plugin_manager: PluginManager | None = None) -> None:
+        self.dependencies = dependencies
+        dependencies.agent_registry = self
+        self.plugin_manager = plugin_manager or build_plugin_manager(dependencies)
+
+    def create(self, agent_id: str):
+        return self.plugin_manager.create(agent_id)
+
+    def list(self) -> list[str]:
+        return self.plugin_manager.list_agents()
+
+    def list_plugins(self) -> list[dict[str, object]]:
+        return self.plugin_manager.list_plugins()
+
+
+def _wazuh_tls(ca_bundle: str | None):
+    """TLS settings for Wazuh. A supplied CA bundle is the only trust anchor.
+
+    Python 3.13+ enables VERIFY_X509_STRICT, which rejects the root CA that
+    wazuh-certs-tool generates (it has no keyUsage extension). For the
+    operator-supplied CA only, drop that one flag; chain and hostname
+    verification stay enforced.
+    """
+    if not ca_bundle:
+        return True
+    ctx = ssl.create_default_context(cafile=ca_bundle)
+    ctx.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
+    return ctx
+
+
+def _connector(settings: Settings):
+    if settings.connector_mode == "mock":
+        return MockTelemetryConnector(settings.fixture_dir / "wazuh_events" / "events.json")
+    if settings.connector_mode != "wazuh":
+        raise ValueError("VIGIL_CONNECTOR_MODE must be mock or wazuh")
+    url = os.getenv("VIGIL_WAZUH_INDEXER_URL")
+    user = os.getenv("VIGIL_WAZUH_INDEXER_USERNAME")
+    password = os.getenv("VIGIL_WAZUH_INDEXER_PASSWORD")
+    if not all((url, user, password)):
+        raise RuntimeError("Wazuh mode requires Indexer URL, username and password")
+    verify = _wazuh_tls(os.getenv("VIGIL_WAZUH_CA_BUNDLE"))
+    indexer = WazuhIndexerClient(
+        url, user, password,
+        index_pattern=os.getenv("VIGIL_WAZUH_INDEX_PATTERN", "wazuh-alerts-*"),
+        verify=verify,
+        timeout_seconds=float(os.getenv("VIGIL_WAZUH_TIMEOUT_SECONDS", "15")),
+    )
+    manager = None
+    if manager_url := os.getenv("VIGIL_WAZUH_MANAGER_URL"):
+        if token := os.getenv("VIGIL_WAZUH_MANAGER_TOKEN"):
+            manager = WazuhManagerClient(manager_url, token, verify=verify)
+    return WazuhTelemetryConnector(indexer, manager)
+
+
+def build_registry(
+    settings: Settings | None = None,
+    store: VigilStore | None = None,
+    *,
+    load_external_plugins: bool = True,
+) -> AgentRegistry:
+    settings = settings or get_settings()
+    store = store or VigilStore(settings.db_path)
+    manager = ModelManager(store, settings.config_dir / "catalogs")
+    intel_key = os.getenv("VIGIL_VIRUSTOTAL_API_KEY")
+    deps = AgentDependencies(
+        runtime=AgentRuntime(
+            max_rounds=settings.max_rounds,
+            max_calls_per_round=settings.max_tool_calls_per_round,
+            max_context_chars=settings.max_context_chars,
+        ), store=store, connector=_connector(settings),
+        validator=EvidenceValidator(), settings=settings, model_manager=manager,
+        threat_intel=VirusTotalHashConnector(intel_key) if intel_key else None,
+    )
+    return AgentRegistry(deps, build_plugin_manager(deps, load_external=load_external_plugins))
+

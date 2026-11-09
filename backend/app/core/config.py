@@ -38,6 +38,11 @@ class Settings:
         os.getenv("WAZUH_INDEXER_VERIFY_SSL", "false").lower() in ("true", "1", "yes")
     )
 
+    # VIGIL agents service (agents/vigil-agents), run separately with `vigil serve`.
+    # Default port 8100 so it does not clash with this backend on 8000.
+    VIGIL_AGENTS_URL: str = os.getenv("VIGIL_AGENTS_URL", "http://127.0.0.1:8100")
+    VIGIL_AGENTS_TOKEN: str = os.getenv("VIGIL_AGENTS_TOKEN", "")
+
     @property
     def wazuh_url(self) -> str:
         if self.WAZUH_API_URL:
